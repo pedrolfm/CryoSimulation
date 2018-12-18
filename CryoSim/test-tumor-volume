@@ -1,0 +1,120 @@
+import sys
+import os
+import os.path
+import unittest
+import random
+import math
+import tempfile
+import time
+import numpy
+import shutil
+from __main__ import vtk, qt, ctk, slicer
+from slicer.ScriptedLoadableModule import *
+
+
+def main():
+    pathinput = '/Users/pedro/Dropbox (Partners HealthCare)/DataForCryoPaper/ralp-028'
+    imageNameinput = 't2ax'
+    labelNameinput = 'Tumor-HR'
+    CheckVolume(pathinput, imageNameinput, labelNameinput)
+
+
+def CheckVolume(path, imageName, labelName):
+    modelImageFileName = '%s/%s.nrrd' % (path, imageName)
+    modelLabelFileName = '%s/%s.nrrd' % (path, labelName)
+    (r, modelImageNode) = slicer.util.loadVolume(modelImageFileName, {}, True)
+    (r, modelLabelNode) = slicer.util.loadLabelVolume(modelLabelFileName, {}, True)
+
+    if not modelImageNode:
+        print "Could not load baseline image: %s." % modelImageFileName
+        return
+
+    if not modelLabelNode:
+        print "Could not load baseline label: %s." % modelLabelFileName
+        slicer.mrmlScene.RemoveNode(modelImageNode)
+        return
+
+    # Create 3D models
+    print "Creating 3D surface models for %s " % modelLabelFileName
+    modelHierarchyNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLModelHierarchyNode")
+
+    # modelHierarchyNode.SetName("ModelHierarchy")
+    slicer.mrmlScene.AddNode(modelHierarchyNode)
+    CreateModels(modelLabelNode, modelHierarchyNode)
+
+    slicer.mrmlScene.RemoveNode(modelLabelNode)
+
+    # Object name dictionary:
+    objectNameDict = {
+        'Model_x_x': 0,  # Not defined -- Reserved
+        'Model_2_2': 1,  # Prostate, 2
+        'Model_3_3': 2,  # Pelvic Diaphragm, 3
+        'Model_4_4': 3,  # Blubospongiosus m., 4
+        'Model_16_16': 4,  # Bulb of the Penus / Corpus Spongiosum, 16
+        'Model_5_5': 5,  # Ischiocavernosus m., 5
+        'Model_6_6': 6,  # Crus of the Penis / Corpus Cavernosum, 6
+        'Model_13_13': 7,  # Transverse Perineal m., 13
+        'Model_10_10': 8,  # Obturator internus m., 10
+        'Model_8_8': 9,  # Rectum, 8
+        'Model_11_11': 10,  # Pubic Arc
+    }
+
+    nOfModels = modelHierarchyNode.GetNumberOfChildrenNodes()
+    print "Number of nodes: %d" % nOfModels
+
+    for i in range(nOfModels):
+        chnode = modelHierarchyNode.GetNthChildNode(i)
+        if chnode == None:
+            continue
+        mnode = chnode.GetAssociatedNode()
+        if mnode == None:
+            continue
+
+        name = mnode.GetName()
+        objectPoly = mnode.GetPolyData()
+
+        if objectPoly == None:
+            continue
+
+        triangle = vtk.vtkTriangleFilter()
+        triangle.SetInputData(objectPoly)
+        triangle.Update()
+        objectTrianglePoly = triangle.GetOutput()
+        triangle.Update()
+
+        massProps = vtk.vtkMassProperties()
+        massProps.SetInputData(triangle.GetOutput())
+        massProps.Update()
+
+        Volume = massProps.GetVolume()
+
+        print "volume %d" % (Volume)
+
+    # Create surface models from a label map and return the node ID of model hierarhcy
+
+
+def CreateModels(labelMapNode, modelHierarchyNode):
+    modelMakerCLI = slicer.modules.modelmaker
+    # tf = tempfile.NamedTemporaryFile(prefix='Slicer/Models-', suffix='.mrml')
+
+    modelMakerParameters = {}
+    # modelMakerParameters['ColorTable'] = 'vtkMRMLColorTableNodeFileGenericAnatomyColors.txt'
+    modelMakerParameters['ModelSceneFile'] = modelHierarchyNode.GetID()
+    modelMakerParameters['Name'] = 'Model'
+    modelMakerParameters['GenerateAll'] = True
+    modelMakerParameters['StartLabel'] = -1
+    modelMakerParameters['EndLabel'] = -1
+    modelMakerParameters['KkipUnNamed'] = True
+    modelMakerParameters['JointSmooth'] = True
+    modelMakerParameters['Smooth'] = 15
+    modelMakerParameters['FilterType'] = 'Sinc'
+    modelMakerParameters['Decimate'] = 0.25
+    modelMakerParameters['SplitNormals'] = True
+    modelMakerParameters['PointNormals'] = True
+    modelMakerParameters['InputVolume'] = labelMapNode.GetID()
+
+    slicer.cli.run(modelMakerCLI, None, modelMakerParameters, True)
+
+
+if __name__ == "__main__":
+    main()
